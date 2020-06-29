@@ -1,114 +1,119 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- * @flow strict-local
- */
+import React, {useState, useCallback} from 'react';
+import {SafeAreaView} from 'react-native';
+import {useRoundTable} from './src/react-round-table';
 
-import React from 'react';
-import {
-  SafeAreaView,
-  StyleSheet,
-  ScrollView,
-  View,
-  Text,
-  StatusBar,
-} from 'react-native';
+import StartPanel from './src/components/StartPanel';
+import VideoViews from './src/components/VideoViews';
 
-import {
-  Header,
-  LearnMoreLinks,
-  Colors,
-  DebugInstructions,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+const App = () => {
+  const [table, setTable] = useState(null);
+  const [streams, setStreams] = useState({});
 
-const App: () => React$Node = () => {
+  const {connectPC, closePC} = useRoundTable();
+
+  // Round Table listeners
+  const onMeetingStarted = useCallback(
+    ({self, table}) => {
+      setTable({...table, self});
+
+      for (const knightId in table.knights) {
+        connectPC({
+          source: self.id === knightId ? 'self' : knightId,
+          onStreamReady: ({stream}) => {
+            setStreams(streams => ({...streams, [knightId]: stream}));
+          },
+        });
+      }
+    },
+    [connectPC],
+  );
+
+  const onMeetingStopped = useCallback(() => {
+    setTable(null);
+    setStreams({});
+  }, []);
+
+  const onKnightJoined = useCallback(({knight}) => {
+    setTable(table => {
+      const cloneKnights = {...table.knights};
+      cloneKnights[knight.id] = knight;
+
+      if (table.seats && table.seats[knight.seatNumber]) {
+        const cloneSeats = {...table.seats};
+        cloneSeats[knight.seatNumber] = knight.id;
+        return {...table, knights: cloneKnights, seats: cloneSeats};
+      }
+
+      return {...table, knights: cloneKnights};
+    });
+  }, []);
+
+  const onKnightLeft = useCallback(
+    ({knight, isRemoved}) => {
+      setTable(table => {
+        const cloneKnights = {...table.knights};
+        delete cloneKnights[knight.id];
+
+        if (table.seats && table.seats[knight.seatNumber]) {
+          const cloneSeats = {...table.seats};
+          cloneSeats[knight.seatNumber] = isRemoved ? 'removed' : 'available';
+          return {...table, knights: cloneKnights, seats: cloneSeats};
+        }
+
+        return {...table, knights: cloneKnights};
+      });
+      setStreams(streams => {
+        const newStreams = {...streams};
+        delete newStreams[knight.id];
+        return newStreams;
+      });
+      closePC({source: knight.id});
+    },
+    [closePC],
+  );
+
+  const onKnightConnected = useCallback(
+    ({knight}) => {
+      setTable(table => {
+        const cloneKnights = {...table.knights};
+        if (!cloneKnights[knight.id]) cloneKnights[knight.id] = knight;
+        cloneKnights[knight.id].isConnected = true;
+        return {...table, knights: cloneKnights};
+      });
+      connectPC({
+        source: knight.id,
+        onStreamReady: ({stream}) => {
+          setStreams(streams => ({...streams, [knight.id]: stream}));
+        },
+      });
+    },
+    [connectPC],
+  );
+
+  const onSourceChanged = useCallback(({source}) => {
+    setTable(table => ({...table, source}));
+  }, []);
+
+  const onSeatsUpdated = useCallback(({seats, numberOfSeats}) => {
+    setTable(table => ({...table, seats, numberOfSeats}));
+  }, []);
+
+  // Round Table
+  useRoundTable({
+    onKnightJoined,
+    onKnightLeft,
+    onKnightConnected,
+    onMeetingStarted,
+    onMeetingStopped,
+    onSourceChanged,
+    onSeatsUpdated,
+  });
+
   return (
-    <>
-      <StatusBar barStyle="dark-content" />
-      <SafeAreaView>
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          style={styles.scrollView}>
-          <Header />
-          {global.HermesInternal == null ? null : (
-            <View style={styles.engine}>
-              <Text style={styles.footer}>Engine: Hermes</Text>
-            </View>
-          )}
-          <View style={styles.body}>
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>Step One</Text>
-              <Text style={styles.sectionDescription}>
-                Edit <Text style={styles.highlight}>App.js</Text> to change this
-                screen and then come back to see your edits.
-              </Text>
-            </View>
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>See Your Changes</Text>
-              <Text style={styles.sectionDescription}>
-                <ReloadInstructions />
-              </Text>
-            </View>
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>Debug</Text>
-              <Text style={styles.sectionDescription}>
-                <DebugInstructions />
-              </Text>
-            </View>
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>Learn More</Text>
-              <Text style={styles.sectionDescription}>
-                Read the docs to discover what to do next:
-              </Text>
-            </View>
-            <LearnMoreLinks />
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    </>
+    <SafeAreaView style={{flex: 1}}>
+      {table ? <VideoViews table={table} streams={streams} /> : <StartPanel />}
+    </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  scrollView: {
-    backgroundColor: Colors.lighter,
-  },
-  engine: {
-    position: 'absolute',
-    right: 0,
-  },
-  body: {
-    backgroundColor: Colors.white,
-  },
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: Colors.black,
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-    color: Colors.dark,
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-  footer: {
-    color: Colors.dark,
-    fontSize: 12,
-    fontWeight: '600',
-    padding: 4,
-    paddingRight: 12,
-    textAlign: 'right',
-  },
-});
 
 export default App;
